@@ -19,6 +19,7 @@ const { parse, compileTemplate } = require('@vue/compiler-sfc')
 const { createSSRApp }           = require('vue')
 const { renderToString }         = require('@vue/server-renderer')
 const vue                        = require('vue')
+const serverRenderer             = require('@vue/server-renderer')
 
 class Vue {
   constructor() {
@@ -82,7 +83,7 @@ class Vue {
     // setup() returns (SFC wins on key conflicts so it can override if needed)
     const sfcSetup  = this.#extractSetup(descriptor)
     const component = {
-      render: renderFn,
+      ssrRender: renderFn,
       async setup(props, ctx) {
         const oreData  = { ...assignments }
         const sfcData  = sfcSetup ? (await sfcSetup(props, ctx)) ?? {} : {}
@@ -119,24 +120,35 @@ class Vue {
       throw new Error(`Template compile errors:\n${errors.map(e => e.message).join('\n')}`)
     }
 
-    // Strip: import { … } from "vue"
-    // Keep everything else, then expose ssrRender (falls back to render)
+    // The compiled SSR template contains ES-module import statements from both
+    // "vue" and "vue/server-renderer".  new Function() cannot execute import
+    // statements, so we transform each one into const alias declarations that
+    // reference the injected parameter names (e.g. `const _foo = foo;`).
     const cjs = code
-      .replace(/\bimport\s+\{[^}]+\}\s+from\s+"vue"\s*;?\n?/g, '')
+      .replace(/\bimport\s+\{([^}]+)\}\s+from\s+"[^"]+"\s*;?\n?/g, (_, bindings) =>
+        bindings.split(',').map(b => {
+          const [orig, alias] = b.trim().split(/\s+as\s+/)
+          return alias
+            ? `const ${alias.trim()} = ${orig.trim()};`
+            : `/* ${orig.trim()} already in scope */`
+        }).join('\n') + '\n'
+      )
       .replace(/\bexport\s+function\s+(ssrRender|render)/, 'function $1')
 
-    // Spread all Vue runtime exports into scope so the compiled code resolves
-    // helpers like _toDisplayString, _createVNode, etc.
-    const vueKeys   = Object.keys(vue)
-    const vueValues = vueKeys.map(k => vue[k])
+    // Merge vue + @vue/server-renderer exports so every helper the compiled
+    // template references (_toDisplayString, ssrInterpolate, ssrRenderAttrs …)
+    // is available as a named parameter.
+    const allDeps   = { ...vue, ...serverRenderer }
+    const depKeys   = Object.keys(allDeps)
+    const depValues = depKeys.map(k => allDeps[k])
 
     // eslint-disable-next-line no-new-func
     const factory = new Function(
-      ...vueKeys,
+      ...depKeys,
       `${cjs}\nreturn typeof ssrRender !== 'undefined' ? ssrRender : render`
     )
 
-    return factory(...vueValues)
+    return factory(...depValues)
   }
 
   /**
