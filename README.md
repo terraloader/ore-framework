@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="www/images/ore-logo.png" alt="Ore" width="200">
+  <img src="www/images/ore-logo.png" alt="Ore" width="400">
   <br><br>
   <strong>A backend framework that pre-calculates data and serves fully server-rendered Vue apps.</strong>
   <br><br>
