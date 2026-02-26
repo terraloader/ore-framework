@@ -6,7 +6,7 @@
 
   ![Node.js](https://img.shields.io/badge/Node.js-18%2B-339933?style=flat-square&logo=node.js&logoColor=white)
   ![Vue 3](https://img.shields.io/badge/Vue-3-4FC08D?style=flat-square&logo=vue.js&logoColor=white)
-  ![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)
+  ![License](https://img.shields.io/badge/license-MPL--2.0-blue?style=flat-square)
 </div>
 
 ---
@@ -166,4 +166,4 @@ www/images/ore-logo.png   →  /images/ore-logo.png
 
 ## License
 
-MIT
+Mozilla Public License 2.0 — see [LICENSE](LICENSE) for details.
