@@ -1,0 +1,16 @@
+{
+  "name": "ore-framework",
+  "version": "0.1.0",
+  "description": "Ore — a backend framework that pre-calculates data and serves fully hydrated Vue apps",
+  "main": "www/index.js",
+  "scripts": {
+    "start": "node www/index.js",
+    "dev": "node --watch www/index.js"
+  },
+  "dependencies": {
+    "@vue/compiler-sfc": "^3.4.0",
+    "@vue/server-renderer": "^3.4.0",
+    "mime-types": "^2.1.35",
+    "vue": "^3.4.0"
+  }
+}
