@@ -8,15 +8,16 @@
  *        injected as reactive setup() return values and as a JSON state
  *        blob (window.__ORE_STATE__) for client-side hydration.
  *
- * The .vue file's <script> block may export additional setup logic; Ore
- * assignments are merged on top so they are always available in the template.
+ * The .vue file may use <script setup> (preferred) or a traditional <script>
+ * block. Ore assignments are merged on top so they are always available in
+ * the template.
  */
 
 import fs   from 'fs'
 import path from 'path'
 import { pathToFileURL } from 'url'
 
-import { parse, compileTemplate } from '@vue/compiler-sfc'
+import { parse, compileTemplate, compileScript } from '@vue/compiler-sfc'
 import { createSSRApp }           from 'vue'
 import { renderToString }         from '@vue/server-renderer'
 
@@ -130,12 +131,21 @@ class Vue {
   }
 
   /**
-   * Evaluate the <script> block and extract a setup() function if present.
-   * The script content is written to a temp .mjs file and dynamically imported
-   * so ES module syntax works natively.
+   * Extract a setup() function from the SFC's <script> or <script setup> block.
+   * For <script setup>, compileScript() is used to produce an equivalent module.
+   * The compiled code is written to a temp .mjs file and dynamically imported.
    */
   async #extractSetup(descriptor, sfcPath) {
-    const scriptContent = descriptor.script?.content
+    let scriptContent = null
+
+    if (descriptor.scriptSetup) {
+      const id = path.basename(sfcPath, '.vue')
+      const compiled = compileScript(descriptor, { id })
+      scriptContent = compiled.content
+    } else if (descriptor.script) {
+      scriptContent = descriptor.script.content
+    }
+
     if (!scriptContent) return null
 
     const tmpFile = sfcPath.replace('.vue', `.script.${Date.now()}.mjs`)

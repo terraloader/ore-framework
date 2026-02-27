@@ -25,13 +25,7 @@
   </main>
 </template>
 
-<script>
-export default {
-  name: 'TestPage',
-  // Additional setup logic can go here.
-  // Data from Ore.vue.assign() is already available in the template
-  // and does not need to be declared here.
-}
+<script setup>
 </script>
 
 <style>
