@@ -13,12 +13,16 @@
  * the template.
  */
 
-import fs   from 'fs'
-import path from 'path'
+import fs             from 'fs'
+import path           from 'path'
+import { createHash } from 'crypto'
 import { pathToFileURL, fileURLToPath } from 'url'
 
-const __dirname     = path.dirname(fileURLToPath(import.meta.url))
+const __dirname       = path.dirname(fileURLToPath(import.meta.url))
 const _componentsRoot = path.join(__dirname, '..', 'components')
+
+/** Stable 8-char hash of an absolute file path — used as the Vue scope ID. */
+const scopeId = sfcPath => createHash('sha256').update(sfcPath).digest('hex').slice(0, 8)
 
 import { parse, compileTemplate, compileScript } from '@vue/compiler-sfc'
 import { createSSRApp }           from 'vue'
@@ -119,7 +123,7 @@ class Vue {
     const { code, errors } = compileTemplate({
       source:   descriptor.template.content,
       filename: sfcPath,
-      id:       path.basename(sfcPath, '.vue'),
+      id:       scopeId(sfcPath),
       ssr:      true,
     })
 
@@ -146,8 +150,7 @@ class Vue {
     let scriptContent = null
 
     if (descriptor.scriptSetup) {
-      const id = path.basename(sfcPath, '.vue')
-      const compiled = compileScript(descriptor, { id })
+      const compiled = compileScript(descriptor, { id: scopeId(sfcPath) })
       scriptContent = compiled.content
     } else if (descriptor.script) {
       scriptContent = descriptor.script.content
@@ -194,7 +197,7 @@ class Vue {
     const { code, errors: tmplErrors } = compileTemplate({
       source:   descriptor.template.content,
       filename: sfcPath,
-      id:       path.basename(sfcPath, '.vue'),
+      id:       scopeId(sfcPath),
       ssr:      false,  // client-side render function
     })
 
