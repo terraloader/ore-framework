@@ -15,7 +15,10 @@
 
 import fs   from 'fs'
 import path from 'path'
-import { pathToFileURL } from 'url'
+import { pathToFileURL, fileURLToPath } from 'url'
+
+const __dirname     = path.dirname(fileURLToPath(import.meta.url))
+const _componentsRoot = path.join(__dirname, '..', 'components')
 
 import { parse, compileTemplate, compileScript } from '@vue/compiler-sfc'
 import { createSSRApp }           from 'vue'
@@ -94,7 +97,11 @@ class Vue {
     const app  = createSSRApp(component)
     const body = await renderToString(app)
 
-    return this.#document(body, descriptor, assignments)
+    // Derive the component identifier (e.g. "test" or "index") from the path
+    const rel         = path.relative(_componentsRoot, sfcPath)
+    const componentId = rel.replace(/[/\\]index\.vue$/, '').replace(/\\/g, '/')
+
+    return this.#document(body, descriptor, assignments, componentId)
   }
 
   // ── Private helpers ────────────────────────────────────────────────────────
@@ -161,10 +168,57 @@ class Vue {
     }
   }
 
+  /**
+   * Compile a .vue SFC's template for the browser (client-side render function).
+   * Returns an ES module string exporting `render`, ready to serve as JavaScript.
+   *
+   * @param  {string} sfcPath  Absolute path to the .vue file
+   * @returns {Promise<string>} JS module source
+   */
+  async compileForClient(sfcPath) {
+    if (!fs.existsSync(sfcPath)) {
+      throw new Error(`Vue SFC not found: ${sfcPath}`)
+    }
+
+    const source = fs.readFileSync(sfcPath, 'utf-8')
+    const { descriptor, errors } = parse(source)
+
+    if (errors.length) {
+      throw new Error(`SFC parse errors in ${sfcPath}:\n${errors.map(e => e.message).join('\n')}`)
+    }
+
+    if (!descriptor.template) {
+      throw new Error(`SFC has no <template> block: ${sfcPath}`)
+    }
+
+    const { code, errors: tmplErrors } = compileTemplate({
+      source:   descriptor.template.content,
+      filename: sfcPath,
+      id:       path.basename(sfcPath, '.vue'),
+      ssr:      false,  // client-side render function
+    })
+
+    if (tmplErrors.length) {
+      throw new Error(`Template compile errors:\n${tmplErrors.map(e => e.message).join('\n')}`)
+    }
+
+    return code
+  }
+
   /** Wrap SSR body in a full HTML document. */
-  #document(body, descriptor, assignments) {
+  #document(body, descriptor, assignments, componentId) {
     const styles = descriptor.styles.map(s => `<style>${s.content}</style>`).join('\n')
     const state  = JSON.stringify(assignments)
+
+    const hydration = `<script type="importmap">
+{"imports":{"vue":"https://esm.sh/vue@3.4"}}
+</script>
+<script type="module">
+import { createSSRApp } from 'vue'
+import { render } from '/ore/component.js?c=${encodeURIComponent(componentId)}'
+const app = createSSRApp({ render, setup() { return window.__ORE_STATE__ || {} } })
+app.mount('#app')
+</script>`
 
     return `<!DOCTYPE html>
 <html lang="en">
@@ -174,6 +228,7 @@ class Vue {
   <link rel="stylesheet" href="/css/main.css">
   ${styles}
   <script>window.__ORE_STATE__ = ${state};</script>
+  ${hydration}
 </head>
 <body>
   <div id="app">${body}</div>
