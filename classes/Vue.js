@@ -12,14 +12,13 @@
  * assignments are merged on top so they are always available in the template.
  */
 
-const fs   = require('fs')
-const path = require('path')
+import fs   from 'fs'
+import path from 'path'
+import { pathToFileURL } from 'url'
 
-const { parse, compileTemplate } = require('@vue/compiler-sfc')
-const { createSSRApp }           = require('vue')
-const { renderToString }         = require('@vue/server-renderer')
-const vue                        = require('vue')
-const serverRenderer             = require('@vue/server-renderer')
+import { parse, compileTemplate } from '@vue/compiler-sfc'
+import { createSSRApp }           from 'vue'
+import { renderToString }         from '@vue/server-renderer'
 
 class Vue {
   constructor() {
@@ -76,12 +75,12 @@ class Vue {
       throw new Error(`SFC parse errors in ${sfcPath}:\n${errors.map(e => e.message).join('\n')}`)
     }
 
-    const renderFn   = this.#compileTemplate(descriptor, sfcPath)
+    const renderFn   = await this.#compileTemplate(descriptor, sfcPath)
     const assignments = this.getAll()
 
     // Build the component: merge Ore assignments with anything the SFC's own
     // setup() returns (SFC wins on key conflicts so it can override if needed)
-    const sfcSetup  = this.#extractSetup(descriptor)
+    const sfcSetup  = await this.#extractSetup(descriptor, sfcPath)
     const component = {
       ssrRender: renderFn,
       async setup(props, ctx) {
@@ -101,10 +100,10 @@ class Vue {
 
   /**
    * Compile the <template> block to a render function using @vue/compiler-sfc.
-   * The compiled code uses ES-module named imports from 'vue'; we strip those
-   * and inject the live bindings manually so the code runs in CommonJS.
+   * The compiled code is written to a temp .mjs file and dynamically imported
+   * so the ES module imports resolve natively — no regex rewriting needed.
    */
-  #compileTemplate(descriptor, sfcPath) {
+  async #compileTemplate(descriptor, sfcPath) {
     if (!descriptor.template) {
       throw new Error(`SFC has no <template> block: ${sfcPath}`)
     }
@@ -113,66 +112,42 @@ class Vue {
       source:   descriptor.template.content,
       filename: sfcPath,
       id:       path.basename(sfcPath, '.vue'),
-      ssr:      true,   // produces ssrRender
+      ssr:      true,
     })
 
     if (errors.length) {
       throw new Error(`Template compile errors:\n${errors.map(e => e.message).join('\n')}`)
     }
 
-    // The compiled SSR template contains ES-module import statements from both
-    // "vue" and "vue/server-renderer".  new Function() cannot execute import
-    // statements, so we transform each one into const alias declarations that
-    // reference the injected parameter names (e.g. `const _foo = foo;`).
-    const cjs = code
-      .replace(/\bimport\s+\{([^}]+)\}\s+from\s+"[^"]+"\s*;?\n?/g, (_, bindings) =>
-        bindings.split(',').map(b => {
-          const [orig, alias] = b.trim().split(/\s+as\s+/)
-          return alias
-            ? `const ${alias.trim()} = ${orig.trim()};`
-            : `/* ${orig.trim()} already in scope */`
-        }).join('\n') + '\n'
-      )
-      .replace(/\bexport\s+function\s+(ssrRender|render)/, 'function $1')
-
-    // Merge vue + @vue/server-renderer exports so every helper the compiled
-    // template references (_toDisplayString, ssrInterpolate, ssrRenderAttrs …)
-    // is available as a named parameter.
-    const allDeps   = { ...vue, ...serverRenderer }
-    const depKeys   = Object.keys(allDeps)
-    const depValues = depKeys.map(k => allDeps[k])
-
-    // eslint-disable-next-line no-new-func
-    const factory = new Function(
-      ...depKeys,
-      `${cjs}\nreturn typeof ssrRender !== 'undefined' ? ssrRender : render`
-    )
-
-    return factory(...depValues)
+    const tmpFile = sfcPath.replace('.vue', `.ssr.${Date.now()}.mjs`)
+    fs.writeFileSync(tmpFile, code)
+    try {
+      const mod = await import(pathToFileURL(tmpFile).href)
+      return mod.ssrRender
+    } finally {
+      fs.unlinkSync(tmpFile)
+    }
   }
 
   /**
    * Evaluate the <script> block and extract a setup() function if present.
-   * Only handles simple default-export objects; for full script-setup support
-   * use compileScript from @vue/compiler-sfc in a future iteration.
+   * The script content is written to a temp .mjs file and dynamically imported
+   * so ES module syntax works natively.
    */
-  #extractSetup(descriptor) {
+  async #extractSetup(descriptor, sfcPath) {
     const scriptContent = descriptor.script?.content
     if (!scriptContent) return null
 
+    const tmpFile = sfcPath.replace('.vue', `.script.${Date.now()}.mjs`)
+    fs.writeFileSync(tmpFile, scriptContent)
     try {
-      // Convert `export default { setup() {…} }` to CommonJS
-      const cjs = scriptContent
-        .replace(/export\s+default\s+/, 'module.exports = ')
-
-      const mod = { exports: {} }
-      // eslint-disable-next-line no-new-func
-      new Function('module', 'exports', 'require', cjs)(mod, mod.exports, require)
-
-      const options = mod.exports.default ?? mod.exports
+      const mod     = await import(pathToFileURL(tmpFile).href)
+      const options = mod.default
       return typeof options?.setup === 'function' ? options.setup : null
     } catch {
       return null
+    } finally {
+      try { fs.unlinkSync(tmpFile) } catch { /* already cleaned up */ }
     }
   }
 
@@ -197,4 +172,4 @@ class Vue {
   }
 }
 
-module.exports = Vue
+export default Vue

@@ -113,4 +113,4 @@ class Db {
   }
 }
 
-module.exports = Db
+export default Db

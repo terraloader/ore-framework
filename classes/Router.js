@@ -9,14 +9,17 @@
  * The component JS module must export an async function that receives
  * (req, res) and uses Ore.vue.assign() to populate template data.
  *
- *   module.exports = async function (req, res) {
+ *   export default async function (req, res) {
  *     Ore.vue.assign('title', 'Hello')
  *   }
  */
 
-const fs   = require('fs')
-const path = require('path')
-const url  = require('url')
+import fs   from 'fs'
+import path from 'path'
+import url  from 'url'
+import { fileURLToPath, pathToFileURL } from 'url'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 class Router {
   constructor() {
@@ -45,9 +48,10 @@ class Router {
     Ore.vue.reset()
 
     try {
-      // Bust the module cache so the component logic always re-runs fresh
-      delete require.cache[require.resolve(componentJs)]
-      const handler = require(componentJs)
+      // Dynamic import with cache-busting query string so the component
+      // logic always re-runs fresh (ESM caches by URL including query)
+      const moduleUrl = pathToFileURL(componentJs).href + '?t=' + Date.now()
+      const { default: handler } = await import(moduleUrl)
 
       if (typeof handler === 'function') {
         await handler(req, res)
@@ -77,4 +81,4 @@ class Router {
   }
 }
 
-module.exports = Router
+export default Router

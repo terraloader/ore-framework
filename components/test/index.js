@@ -8,7 +8,7 @@
  * @param {http.IncomingMessage} req
  * @param {http.ServerResponse}  res
  */
-module.exports = async function (req, res) {
+export default async function (req, res) {
 
   // ── Static assignments ────────────────────────────────────────────────────
   Ore.vue.assign('title',   'Test Page')

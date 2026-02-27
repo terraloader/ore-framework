@@ -10,15 +10,17 @@
  */
 
 // Initialise the global Ore singleton (sets global.Ore)
-require('../classes/Ore')
+import '../classes/Ore.js'
 
-const http  = require('http')
-const fs    = require('fs')
-const path  = require('path')
-const mime  = require('mime-types')
+import http from 'http'
+import fs   from 'fs'
+import path from 'path'
+import mime from 'mime-types'
+import { fileURLToPath } from 'url'
 
+const __dirname  = path.dirname(fileURLToPath(import.meta.url))
 const PORT       = Number(process.env.PORT) || 3000
-const STATIC_DIR = path.join(__dirname)
+const STATIC_DIR = __dirname
 
 // URL prefixes that are served as plain static files
 const STATIC_PREFIXES = ['/css/', '/images/']
