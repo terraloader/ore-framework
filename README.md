@@ -7,6 +7,8 @@
   ![Node.js](https://img.shields.io/badge/Node.js-18%2B-339933?style=flat-square&logo=node.js&logoColor=white)
   ![Vue 3](https://img.shields.io/badge/Vue-3-4FC08D?style=flat-square&logo=vue.js&logoColor=white)
   ![License](https://img.shields.io/badge/license-MPL--2.0-blue?style=flat-square)
+  <br><br>
+  <a href="https://ore-framework-ace3aaf93391.herokuapp.com/">Live Demo</a>
 </div>
 
 ---
