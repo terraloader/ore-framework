@@ -15,9 +15,9 @@
 
 ## What is Ore?
 
-Ore is a lightweight Node.js backend framework built around one idea: **run all your logic on the server, assign the results to a Vue template, and ship a fully rendered HTML page** — no client-side data fetching, no loading spinners.
+Ore is a lightweight Node.js framework for building Vue apps where **the server and the browser are equal partners**: the server pre-calculates all data and renders the full HTML so the browser gets a complete page instantly, then the same Vue component boots up on the client and takes over — making everything interactive without a re-render or a second round-trip for data.
 
-Every URL maps to a component directory. The component's JavaScript file runs server-side, pushes data through `Ore.vue.assign()`, and Ore handles the rest — compiling the Vue SFC, rendering it to HTML, injecting the state, and sending a complete page to the browser. A client-side Vue app is then bootstrapped automatically from the same component and takes over the server-rendered DOM via hydration, making the page fully interactive without a re-render.
+Every URL maps to a component directory. The component's JavaScript file runs server-side and pushes data through `Ore.vue.assign()`. Ore compiles the Vue SFC, renders it to HTML, and embeds both the state and a hydration script in the response. The browser receives a fully rendered page, then Vue mounts on the existing DOM and the app becomes live.
 
 ---
 
