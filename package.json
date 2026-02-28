@@ -4,9 +4,14 @@
   "description": "Ore — a backend framework that pre-calculates data and serves fully hydrated Vue apps",
   "type": "module",
   "main": "www/index.js",
+  "ore": {
+    "vue": "dev"
+  },
   "scripts": {
     "start": "node www/index.js",
-    "dev": "node --watch www/index.js"
+    "dev": "node --watch www/index.js",
+    "vue:dev": "node --input-type=commonjs -e \"const fs=require('fs'),p=JSON.parse(fs.readFileSync('package.json','utf8'));p.ore.vue='dev';fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\\n');console.log('[Ore] Vue mode set to: dev')\"",
+    "vue:prod": "node --input-type=commonjs -e \"const fs=require('fs'),p=JSON.parse(fs.readFileSync('package.json','utf8'));p.ore.vue='prod';fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\\n');console.log('[Ore] Vue mode set to: prod')\""
   },
   "dependencies": {
     "@vue/compiler-sfc": "^3.4.0",

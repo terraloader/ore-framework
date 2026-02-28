@@ -21,6 +21,24 @@ import { pathToFileURL, fileURLToPath } from 'url'
 const __dirname       = path.dirname(fileURLToPath(import.meta.url))
 const _componentsRoot = path.join(__dirname, '..', 'components')
 
+/** Read the ore.vue mode from package.json ("dev" | "prod", defaults to "dev"). */
+function _readVueMode() {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf-8'))
+    return pkg?.ore?.vue === 'prod' ? 'prod' : 'dev'
+  } catch {
+    return 'dev'
+  }
+}
+
+/** CDN URL for the browser-side Vue import. */
+function _vueCdnUrl() {
+  const mode = _readVueMode()
+  return mode === 'prod'
+    ? 'https://esm.sh/vue@3.4'
+    : 'https://esm.sh/vue@3.4?dev'
+}
+
 /** Stable 8-char hash of an absolute file path — used as the Vue scope ID. */
 const scopeId = sfcPath => createHash('sha256').update(sfcPath).digest('hex').slice(0, 8)
 
@@ -219,7 +237,7 @@ class Vue {
     const state  = JSON.stringify(assignments)
 
     const hydration = `<script type="importmap">
-{"imports":{"vue":"https://esm.sh/vue@3.4"}}
+{"imports":{"vue":"${_vueCdnUrl()}"}}
 </script>
 <script type="module">
 import { createSSRApp } from 'vue'
