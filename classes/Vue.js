@@ -240,9 +240,9 @@ class Vue {
 {"imports":{"vue":"${_vueCdnUrl()}"}}
 </script>
 <script type="module">
-import { createSSRApp } from 'vue'
+import { createSSRApp, reactive } from 'vue'
 import { render } from '/ore/component.js?c=${encodeURIComponent(componentId)}'
-const state = (window.__ORE_STATE__ || {})['${instanceId}'] || {}
+const state = reactive((window.__ORE_STATE__ || {})['${instanceId}'] || {})
 const app = createSSRApp({ render, setup() { return state } })
 app.mount('#ore-${instanceId}')
 </script>`
