@@ -15,7 +15,7 @@
 
 import fs             from 'fs'
 import path           from 'path'
-import { createHash } from 'crypto'
+import { createHash, randomBytes } from 'crypto'
 import { pathToFileURL, fileURLToPath } from 'url'
 
 const __dirname       = path.dirname(fileURLToPath(import.meta.url))
@@ -105,7 +105,12 @@ class Vue {
     const rel         = path.relative(_componentsRoot, sfcPath)
     const componentId = rel.replace(/[/\\]index\.vue$/, '').replace(/\\/g, '/')
 
-    return this.#document(body, descriptor, assignments, componentId)
+    // Unique per-render instance ID — shared between the SSR output and the
+    // client hydration script so each instance mounts on the correct DOM node
+    // and reads the correct state slice from window.__ORE_STATE__.
+    const instanceId = randomBytes(6).toString('hex')
+
+    return this.#document(body, descriptor, assignments, componentId, instanceId)
   }
 
   // ── Private helpers ────────────────────────────────────────────────────────
@@ -209,7 +214,7 @@ class Vue {
   }
 
   /** Wrap SSR body in a full HTML document. */
-  #document(body, descriptor, assignments, componentId) {
+  #document(body, descriptor, assignments, componentId, instanceId) {
     const styles = descriptor.styles.map(s => `<style>${s.content}</style>`).join('\n')
     const state  = JSON.stringify(assignments)
 
@@ -219,8 +224,9 @@ class Vue {
 <script type="module">
 import { createSSRApp } from 'vue'
 import { render } from '/ore/component.js?c=${encodeURIComponent(componentId)}'
-const app = createSSRApp({ render, setup() { return window.__ORE_STATE__ || {} } })
-app.mount('#app')
+const state = (window.__ORE_STATE__ || {})['${instanceId}'] || {}
+const app = createSSRApp({ render, setup() { return state } })
+app.mount('#ore-${instanceId}')
 </script>`
 
     return `<!DOCTYPE html>
@@ -230,11 +236,11 @@ app.mount('#app')
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="stylesheet" href="/css/main.css">
   ${styles}
-  <script>window.__ORE_STATE__ = ${state};</script>
+  <script>window.__ORE_STATE__ = window.__ORE_STATE__ || {}; window.__ORE_STATE__['${instanceId}'] = ${state};</script>
   ${hydration}
 </head>
 <body>
-  <div id="app">${body}</div>
+  <div id="ore-${instanceId}">${body}</div>
 </body>
 </html>`
   }
