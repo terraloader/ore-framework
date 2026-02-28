@@ -30,6 +30,33 @@ const STATIC_PREFIXES = ['/css/', '/images/']
 const server = http.createServer(async (req, res) => {
   const urlPath = req.url.split('?')[0]
 
+  // ── Client-side component compilation endpoint ────────────────────────────
+  if (urlPath === '/ore/component.js') {
+    const params  = new URLSearchParams(req.url.includes('?') ? req.url.slice(req.url.indexOf('?') + 1) : '')
+    const compId  = params.get('c') ?? ''
+
+    // Guard against path traversal
+    if (!compId || compId.includes('..') || compId.startsWith('/')) {
+      res.writeHead(400, { 'Content-Type': 'text/plain' })
+      res.end('Bad Request')
+      return
+    }
+
+    const componentsRoot = path.join(__dirname, '..', 'components')
+    const vuePath        = path.join(componentsRoot, compId, 'index.vue')
+
+    try {
+      const js = await Ore.vue.compileForClient(vuePath)
+      res.writeHead(200, { 'Content-Type': 'application/javascript; charset=utf-8' })
+      res.end(js)
+    } catch (err) {
+      console.error('[Ore] Component compile error:', err)
+      res.writeHead(500, { 'Content-Type': 'text/plain' })
+      res.end('Internal Server Error')
+    }
+    return
+  }
+
   // ── Static file handling ─────────────────────────────────────────────────
   if (STATIC_PREFIXES.some(p => urlPath.startsWith(p))) {
     const filePath = path.join(STATIC_DIR, urlPath)
