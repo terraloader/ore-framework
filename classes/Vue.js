@@ -11,6 +11,11 @@
  * The .vue file may use <script setup> (preferred) or a traditional <script>
  * block. Ore assignments are merged on top so they are always available in
  * the template.
+ *
+ * Sub-component support:
+ *   Any PascalCase tag in a template (e.g. <SampleCounter />) is resolved to
+ *   the matching components/<kebab-case>/index.vue file automatically — both
+ *   for SSR and for client hydration.  No manual registration is required.
  */
 
 import fs             from 'fs'
@@ -41,6 +46,38 @@ function _vueCdnUrl() {
 
 /** Stable 8-char hash of an absolute file path — used as the Vue scope ID. */
 const scopeId = sfcPath => createHash('sha256').update(sfcPath).digest('hex').slice(0, 8)
+
+/**
+ * Convert a PascalCase component name to the kebab-case folder name used
+ * under components/.  Example: "SampleCounter" → "sample-counter".
+ */
+function compNameToFolderId(name) {
+  return name.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase()
+}
+
+/**
+ * Scan a raw template source string for PascalCase component tag names and
+ * resolve each one to a components/<kebab>/index.vue path.
+ * Only entries whose file actually exists are returned.
+ *
+ * @param  {string} templateSource  Raw <template> content
+ * @returns {{ name: string, id: string, sfcPath: string }[]}
+ */
+function scanSubComponents(templateSource) {
+  const re    = /<([A-Z][a-zA-Z0-9]*)/g
+  const names = new Set()
+  let m
+  while ((m = re.exec(templateSource)) !== null) {
+    names.add(m[1])
+  }
+  return [...names]
+    .map(name => ({
+      name,
+      id:      compNameToFolderId(name),
+      sfcPath: path.join(_componentsRoot, compNameToFolderId(name), 'index.vue'),
+    }))
+    .filter(({ sfcPath }) => fs.existsSync(sfcPath))
+}
 
 import { parse, compileTemplate, compileScript } from '@vue/compiler-sfc'
 import { createSSRApp }           from 'vue'
@@ -101,12 +138,15 @@ class Vue {
       throw new Error(`SFC parse errors in ${sfcPath}:\n${errors.map(e => e.message).join('\n')}`)
     }
 
+    // Discover sub-components referenced in this template
+    const subComps = scanSubComponents(descriptor.template?.content ?? '')
+
     const renderFn   = await this.#compileTemplate(descriptor, sfcPath)
     const assignments = this.getAll()
 
     // Build the component: merge Ore assignments with anything the SFC's own
     // setup() returns (SFC wins on key conflicts so it can override if needed)
-    const sfcSetup  = await this.#extractSetup(descriptor, sfcPath)
+    const { setup: sfcSetup } = await this.#extractScriptOptions(descriptor, sfcPath)
     const component = {
       ssrRender: renderFn,
       async setup(props, ctx) {
@@ -116,7 +156,14 @@ class Vue {
       }
     }
 
-    const app  = createSSRApp(component)
+    const app = createSSRApp(component)
+
+    // Register each resolved sub-component on the SSR app
+    for (const sub of subComps) {
+      const subComp = await this.#buildSubComponent(sub.sfcPath)
+      app.component(sub.name, subComp)
+    }
+
     const body = await renderToString(app)
 
     // Derive the component identifier (e.g. "test" or "index") from the path
@@ -128,7 +175,7 @@ class Vue {
     // and reads the correct state slice from window.__ORE_STATE__.
     const instanceId = randomBytes(6).toString('hex')
 
-    return this.#document(body, descriptor, assignments, componentId, instanceId)
+    return this.#document(body, descriptor, assignments, componentId, instanceId, subComps)
   }
 
   // ── Private helpers ────────────────────────────────────────────────────────
@@ -165,11 +212,13 @@ class Vue {
   }
 
   /**
-   * Extract a setup() function from the SFC's <script> or <script setup> block.
+   * Extract setup() and props from the SFC's <script> or <script setup> block.
    * For <script setup>, compileScript() is used to produce an equivalent module.
    * The compiled code is written to a temp .mjs file and dynamically imported.
+   *
+   * @returns {Promise<{ setup: Function|null, props: object|null }>}
    */
-  async #extractSetup(descriptor, sfcPath) {
+  async #extractScriptOptions(descriptor, sfcPath) {
     let scriptContent = null
 
     if (descriptor.scriptSetup) {
@@ -179,24 +228,51 @@ class Vue {
       scriptContent = descriptor.script.content
     }
 
-    if (!scriptContent) return null
+    if (!scriptContent) return { setup: null, props: null }
 
     const tmpFile = sfcPath.replace('.vue', `.script.${Date.now()}.mjs`)
     fs.writeFileSync(tmpFile, scriptContent)
     try {
       const mod     = await import(pathToFileURL(tmpFile).href)
       const options = mod.default
-      return typeof options?.setup === 'function' ? options.setup : null
+      return {
+        setup: typeof options?.setup === 'function' ? options.setup : null,
+        props: options?.props ?? null,
+      }
     } catch {
-      return null
+      return { setup: null, props: null }
     } finally {
       try { fs.unlinkSync(tmpFile) } catch { /* already cleaned up */ }
     }
   }
 
   /**
-   * Compile a .vue SFC's template for the browser (client-side render function).
-   * Returns an ES module string exporting `render`, ready to serve as JavaScript.
+   * Build a full SSR-ready component object for a sub-component SFC.
+   * Returns { ssrRender, setup?, props? } suitable for app.component().
+   *
+   * @param  {string} sfcPath  Absolute path to the sub-component's .vue file
+   * @returns {Promise<object>}
+   */
+  async #buildSubComponent(sfcPath) {
+    const source = fs.readFileSync(sfcPath, 'utf-8')
+    const { descriptor } = parse(source)
+
+    const ssrRender            = await this.#compileTemplate(descriptor, sfcPath)
+    const { setup, props }     = await this.#extractScriptOptions(descriptor, sfcPath)
+
+    return {
+      ssrRender,
+      ...(setup ? { setup } : {}),
+      ...(props ? { props } : {}),
+    }
+  }
+
+  /**
+   * Compile a .vue SFC's template + script for the browser.
+   * Returns an ES module string that exports:
+   *   - named `render`  — for use as the top-level page component
+   *   - default export  — full component { render, setup?, props? } for
+   *                       sub-component registration via app.component()
    *
    * @param  {string} sfcPath  Absolute path to the .vue file
    * @returns {Promise<string>} JS module source
@@ -217,24 +293,51 @@ class Vue {
       throw new Error(`SFC has no <template> block: ${sfcPath}`)
     }
 
-    const { code, errors: tmplErrors } = compileTemplate({
+    // Compile <script setup> / <script> if present
+    let scriptContent = null
+    if (descriptor.scriptSetup || descriptor.script) {
+      const compiled = compileScript(descriptor, { id: scopeId(sfcPath) })
+      scriptContent  = compiled.content
+    }
+
+    // Compile the template to a client-side render function
+    const { code: templateCode, errors: tmplErrors } = compileTemplate({
       source:   descriptor.template.content,
       filename: sfcPath,
       id:       scopeId(sfcPath),
-      ssr:      false,  // client-side render function
+      ssr:      false,
     })
 
     if (tmplErrors.length) {
       throw new Error(`Template compile errors:\n${tmplErrors.map(e => e.message).join('\n')}`)
     }
 
-    return code
+    // If there is no script, just ship the render function
+    if (!scriptContent || !scriptContent.includes('export default')) {
+      return `${templateCode}\nexport default { render }`
+    }
+
+    // Transform the compiled script so its default export becomes a variable,
+    // then merge the render function in before re-exporting everything.
+    // `export default` can only appear once in a compiled SFC script block,
+    // so a simple string replace is reliable here.
+    const scriptWithoutExport = scriptContent.replace(/export default\s+/, 'const __sfc__ = ')
+
+    return `${scriptWithoutExport}\n${templateCode}\nexport default Object.assign(__sfc__, { render })`
   }
 
   /** Wrap SSR body in a full HTML document. */
-  #document(body, descriptor, assignments, componentId, instanceId) {
+  #document(body, descriptor, assignments, componentId, instanceId, subComps = []) {
     const styles = descriptor.styles.map(s => `<style>${s.content}</style>`).join('\n')
     const state  = JSON.stringify(assignments)
+
+    // Build sub-component import + registration lines for the hydration script
+    const subImports = subComps
+      .map(s => `import ${s.name} from '/ore/component.js?c=${encodeURIComponent(s.id)}'`)
+      .join('\n')
+    const subRegistrations = subComps
+      .map(s => `app.component('${s.name}', ${s.name})`)
+      .join('\n')
 
     const hydration = `<script type="importmap">
 {"imports":{"vue":"${_vueCdnUrl()}"}}
@@ -242,8 +345,10 @@ class Vue {
 <script type="module">
 import { createSSRApp, reactive } from 'vue'
 import { render } from '/ore/component.js?c=${encodeURIComponent(componentId)}'
+${subImports}
 const state = reactive((window.__ORE_STATE__ || {})['${instanceId}'] || {})
 const app = createSSRApp({ render, setup() { return state } })
+${subRegistrations}
 app.mount('#ore-${instanceId}')
 </script>`
 
